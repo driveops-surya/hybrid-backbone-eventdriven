@@ -1,0 +1,205 @@
+# Hybrid Backbone Runbook
+
+## Prerequisites
+- AWS account
+- AWS CLI configured
+- Terraform installed
+- Docker Desktop installed
+- IAM permissions to create S3, Lambda, ECS, ECR, DynamoDB, IAM, KMS, and VPC resources
+
+
+Complete deployment and operational guide for the Hybrid Backbone infrastructure.
+
+---
+
+## 1. Infrastructure Setup
+
+Initialize and deploy the Terraform infrastructure.(base infrastructure)
+
+```bash
+cd infra
+terraform init
+terraform validate 
+terraform plan
+terraform apply
+```
+
+Terraform provisioning can take a few minutes on first deploy, especially with IAM and ECS resources.
+If `terraform apply` fails midway, re-run it before troubleshooting manually. 
+
+
+
+---
+
+## 2. Build and Deploy Processor Container
+
+Build the Docker image and push to Amazon ECR.
+
+### Navigate to processor directory
+```bash
+cd src/processor
+```
+
+### Build Docker image
+```bash
+docker build -t hybrid-processor .
+```
+
+### Login to ECR
+```bash
+aws ecr get-login-password --region eu-central-1 | \
+  docker login --username AWS --password-stdin 231838751996.dkr.ecr.eu-central-1.amazonaws.com
+```
+
+### Tag Docker image
+```bash
+docker tag hybrid-processor:latest 231838751996.dkr.ecr.eu-central-1.amazonaws.com/hybrid-backbone-seslw6vo-processor:latest
+```
+
+### Push to ECR
+```bash
+docker push 231838751996.dkr.ecr.eu-central-1.amazonaws.com/hybrid-backbone-seslw6vo-processor:latest
+```
+
+---
+
+## 3. Verify the Lambda Trigger 
+
+Check Lambda function deployment and configuration.
+
+### List Lambda functions
+```bash
+aws lambda list-functions --region eu-central-1 | grep hybrid-backbone
+```
+
+### Get Lambda function details
+```bash
+aws lambda get-function --function-name hybrid-backbone-seslw6vo-s3-trigger --region eu-central-1 --query 'Configuration.LoggingConfig.LogGroup'
+```
+
+### Check Lambda function status
+```bash
+aws lambda get-function --function-name hybrid-backbone-seslw6vo-s3-trigger --region eu-central-1 --query 'Configuration.[FunctionName,State,LastUpdateStatus]'
+```
+
+### List all Lambda function names
+```bash
+aws lambda list-functions --region eu-central-1 --query 'Functions[*].FunctionName'
+```
+
+---
+
+## 4. Test Data Upload
+
+Create test data, compress, and upload to S3 ingress bucket.
+
+### Create test data file
+```bash
+echo Test data for hybrid backbone > data.txt
+```
+
+### Generate timestamp for unique filename
+```powershell
+powershell -Command "Get-Date -Format 'yyyyMMdd-HHmmss'"
+```
+
+### Create ZIP archive (PowerShell)
+```powershell
+powershell -Command "Compress-Archive -Path data.txt -DestinationPath test-data-20260105-143022.zip -Force"
+```
+
+### Upload to S3 with KMS encryption and organization tag
+```bash
+aws s3api put-object `
+  --bucket hybrid-backbone-seslw6vo-ingress-seslw6vo `
+  --key test-package.zip `
+  --body test-package.zip `
+  --tagging "organization-id=test-org-001" `
+  --server-side-encryption aws:kms `
+  --region eu-central-1
+```
+
+---
+
+## 5. Monitor ECS Task Execution
+
+Check if the Lambda trigger successfully launched ECS tasks.
+
+If no ECS task starts after upload, check:
+
+- Lambda CloudWatch logs
+- S3 event notifications
+- ECS task execution role permissions
+- VPC outbound access to ECR
+
+### List ECS tasks in cluster
+```bash
+aws ecs list-tasks --cluster hybrid-backbone-seslw6vo-cluster --region eu-central-1
+```
+
+### Get task details (if task ID known)
+```bash
+aws ecs describe-tasks \
+  --cluster hybrid-backbone-seslw6vo-cluster \
+  --tasks <TASK_ARN> \
+  --region eu-central-1
+```
+
+---
+
+## 6. Validate Audit trial 
+
+View processing records stored in DynamoDB audit table.
+
+### Query audit table by OrganizationId
+```bash
+aws dynamodb query \
+  --table-name hybrid-backbone-seslw6vo-audit \
+  --index-name OrgIndex \
+  --key-condition-expression "OrganizationId = :org" \
+  --expression-attribute-values '{":org":{"S":"test-org-001"}}' \
+  --region eu-central-1 \
+  --output table
+```
+
+### Scan audit table (first 5 items)
+```bash
+aws dynamodb scan \
+  --table-name hybrid-backbone-seslw6vo-audit \
+  --region eu-central-1 \
+  --limit 5 \
+  --query 'Items[*].[Step,Status]' \
+  --output text
+```
+
+---
+
+## 7. Expected Output
+
+After uploading test data, the end-to-end workflow should execute successfully. ECS task logs in CloudWatch should display processing status:
+
+![ECS Task Logs - Expected Output](docs/expected-output.png)
+
+The logs show:
+-  File download from S3 ingress bucket
+-  Organization metadata extraction
+-  File processing completion
+-  Audit trail entries written to DynamoDB
+
+## 8. Clean Up 
+To avoid AWS charges, destroy all Terraform-managed resources:
+```bash
+cd infra
+terraform destroy
+
+
+---
+
+## Notes
+
+- **Region**: The examples assume `eu-central-1`. Update region flags if deploying elsewhere.
+- **Account ID**: `231838751996` - update to your AWS account ID.
+- **Resource Suffix**: `seslw6vo` is auto-generated by Terraform. Check Terraform outputs for actual values.
+- **KMS Encryption**: S3 uploads require `--server-side-encryption aws:kms` due to bucket policy enforcement.
+- **Tags**: Organization ID is used for audit trail segmentation and querying.
+
