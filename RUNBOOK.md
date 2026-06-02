@@ -47,20 +47,16 @@ docker build -t hybrid-processor .
 
 ### Login to ECR
 ```bash
-aws ecr get-login-password --region eu-central-1 | \
-  docker login --username AWS --password-stdin 231838751996.dkr.ecr.eu-central-1.amazonaws.com
+$password = aws ecr get-login-password --region ap-south-1
+docker login --username AWS --password $password 157125373921.dkr.ecr.ap-south-1.amazonaws.com
 ```
 
 ### Tag Docker image
 ```bash
-docker tag hybrid-processor:latest 231838751996.dkr.ecr.eu-central-1.amazonaws.com/hybrid-backbone-seslw6vo-processor:latest
+docker build -t hybrid-processor .
+docker tag hybrid-processor:latest 157125373921.dkr.ecr.ap-south-1.amazonaws.com/hybrid-backbone-d8r218zz-processor:latest
+docker push 157125373921.dkr.ecr.ap-south-1.amazonaws.com/hybrid-backbone-d8r218zz-processor:latest
 ```
-
-### Push to ECR
-```bash
-docker push 231838751996.dkr.ecr.eu-central-1.amazonaws.com/hybrid-backbone-seslw6vo-processor:latest
-```
-
 ---
 
 ## 3. Verify the Lambda Trigger 
@@ -112,8 +108,8 @@ powershell -Command "Compress-Archive -Path data.txt -DestinationPath test-data-
 ```bash
 aws s3api put-object `
   --bucket hybrid-backbone-seslw6vo-ingress-seslw6vo `
-  --key test-package.zip `
-  --body test-package.zip `
+  --key test-data-20260105-143022.zip `
+  --body test-data-20260105-143022.zip `
   --tagging "organization-id=test-org-001" `
   --server-side-encryption aws:kms `
   --region eu-central-1
@@ -164,12 +160,12 @@ aws dynamodb query \
 
 ### Scan audit table (first 5 items)
 ```bash
-aws dynamodb scan \
-  --table-name hybrid-backbone-seslw6vo-audit \
-  --region eu-central-1 \
-  --limit 5 \
-  --query 'Items[*].[Step,Status]' \
-  --output text
+aws dynamodb scan `
+  --table-name hybrid-backbone-d8r218zz-audit `
+  --region ap-south-1 `
+  --limit 5 `
+  --query "Items[*].[Step.S,Status.S]" `
+  --output table
 ```
 
 ---
