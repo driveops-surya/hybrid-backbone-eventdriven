@@ -5,7 +5,7 @@ terraform {
   backend "s3" {
     bucket         = "hybrid-backbone"
     key            = "env/dev/terraform.tfstate"
-    region         = "eu-central-1"
+    region         = "ap-south-1"
     use_lockfile   = true
     encrypt        = true
   }
